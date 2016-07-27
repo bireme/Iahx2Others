@@ -1,0 +1,1 @@
+tw:((tw:(zika)) AND (tw:(gravidez))) AND (instance:"regional") AND ( db:("LILACS") AND limit:("pregnancy") AND pais_assunto:("brasil") AND la:("pt") AND year_cluster:("2016"))
