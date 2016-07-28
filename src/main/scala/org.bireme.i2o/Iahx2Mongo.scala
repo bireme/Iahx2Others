@@ -10,14 +10,14 @@ object Iahx2Mongo extends App {
 
 
   private def usage(): Unit = {
-    Console.err.println("usage: Iahx2Mongo (<query>|@<queryFile>) <dbName>"  +
+    Console.err.println("usage: Iahx2Mongo (<query>|@<queryFile>) <database>"  +
                   "<collection>\n\t\t  [-iahxUrl=<url>] [-mongoHost=<host>]" +
                   "\n\t\t  [-mongoPort=<port>] [-from=<int>] [-quantity=<int>]")
     System.exit(1)
   }
 
   if (args.length < 3) usage()
-
+  
   System.setProperty(DEFAULT_LOG_LEVEL_KEY, "ERROR")
 
   val parameters = args.drop(3).foldLeft[Map[String,String]](Map()) {
