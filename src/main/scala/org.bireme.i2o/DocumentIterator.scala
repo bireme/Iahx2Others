@@ -65,7 +65,7 @@ class DocumentIterator(query: String,
         case _ => docs
       }
       docs = xdocs.tail
-      if (current % 1000 == 0) println("+++" + current)
+      if (current % 1000 == 0) println("+++" + current + "/" + numDocs)
       current += 1
       val doc = xdocs.head
       oos match {
