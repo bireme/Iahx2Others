@@ -17,7 +17,7 @@ object Iahx2Mongo extends App {
   }
 
   if (args.length < 3) usage()
-  
+
   System.setProperty(DEFAULT_LOG_LEVEL_KEY, "ERROR")
 
   val parameters = args.drop(3).foldLeft[Map[String,String]](Map()) {
@@ -45,9 +45,8 @@ object Iahx2Mongo extends App {
                       coll: MongoCollection): Unit = {
     coll.drop()
 
-    iterator.zipWithIndex.foreach {
-      case (doc, pos) => {
-        if (pos % 100 == 0) println("+++ " + pos)
+    iterator.foreach {
+      case doc => {        
         //println("\n" + doc + "\n")
         val builder = new MongoDBObjectBuilder() ++= doc
         coll += new MongoDBObject(builder.result())
