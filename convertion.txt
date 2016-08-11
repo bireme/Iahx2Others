@@ -1,0 +1,10 @@
+lil Lilacs Lilacs
+mdl Medline Medline
+bde Bdenf Bdenf
+who Wholis Wholis
+ibc Ibecs Ibecs
+pah Paho Paho
+ses SecEstSaudeSP SecEstSaudeSP
+med MedCaribe MedCaribe
+cum CuMed CuMed
+

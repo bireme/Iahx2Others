@@ -38,9 +38,9 @@ class Iahx2Mongo2Json {
     val colls = getCollections(host, port, convFile, convEncoding)
     val ids = getIds(iahxServUrl, query, from, quantity)
 //println(ids)
-    val ids2 = ids.filter(id => id.startsWith("lil-"))
+    //val ids2 = ids.filter(id => id.startsWith("lil-"))
 
-    export(ids2, colls, fields)
+    export(ids, colls, fields)
   }
 
   private def export(ids: List[String],

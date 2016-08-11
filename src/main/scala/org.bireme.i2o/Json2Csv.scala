@@ -1,6 +1,6 @@
 package org.bireme.i2o
 
-import java.io.{BufferedOutputStream,File,FileOutputStream,ObjectOutputStream}
+import java.io.{File, Writer}
 import java.nio.charset.Charset
 import java.nio.file.{Files,Paths}
 
@@ -11,16 +11,24 @@ import scala.collection.immutable.{TreeMap,TreeSet}
 class Json2Csv {
   val defNullCell = "<empty>"
 
-  def toCsv(it: () => Iterator[Option[Map[String,Any]]],
-            outFile: String,
-            parameters: Map[String,String]): Unit = {
+  def toFileCsv(it: () => Iterator[Option[Map[String,Any]]],
+                outFile: String,
+                parameters: Map[String,String]): Unit = {
     val outEncoding = parameters.getOrElse("outEncoding", "utf-8")
+    val output = Files.newBufferedWriter(new File(outFile).toPath(),
+                                                   Charset.forName(outEncoding))
+    toCsv(it, output, parameters)
+    output.close()
+  }
+
+  def toCsv(it: () => Iterator[Option[Map[String,Any]]],
+            writer: Writer,
+            parameters: Map[String,String]): Unit = {
+
     val fieldDelim = parameters.getOrElse("fieldDelim", ",").charAt(0)
     val explode = parameters.getOrElse("explodeFields", "").trim.split(" *, *")
                                                       .filter(!_.isEmpty).toSet
-    val output = Files.newBufferedWriter(new File(outFile).toPath(),
-                                                   Charset.forName(outEncoding))
-    val csv = new CSVPrinter(output, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
+    val csv = new CSVPrinter(writer, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
     val max = getMaxFldOcc(it(), explode)
     val header = getHeader(max)
     val fields = List() ++ max.keys
@@ -43,8 +51,8 @@ class Json2Csv {
       }
       case None => ()
     }
-    csv.close()
-    output.close()
+    csv.flush()
+    //writer.close()
   }
 
   private def printField(fld: Any,
