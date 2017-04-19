@@ -1,10 +1,10 @@
 lil Lilacs Lilacs
-mdl Medline Medline
-bde Bdenf Bdenf
-who Wholis Wholis
-ibc Ibecs Ibecs
-pah Paho Paho
-ses SecEstSaudeSP SecEstSaudeSP
-med MedCaribe MedCaribe
-cum CuMed CuMed
+mdl Mining Medline
+bde Mining Bdenf
+who Mining Wholis
+ibc Mining Ibecs
+pah Mining Paho
+ses Mining SecEstSaudeSP
+med Mining MedCaribe
+cum Mining CuMed
 

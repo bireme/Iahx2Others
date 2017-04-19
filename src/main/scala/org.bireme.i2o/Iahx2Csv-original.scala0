@@ -1,0 +1,127 @@
+package org.bireme.i2o
+
+import java.io.{File, StringWriter, Writer}
+import java.nio.charset.Charset
+import java.nio.file.{Files,Paths}
+
+import org.apache.commons.csv.{CSVFormat,CSVPrinter}
+
+import scala.collection.immutable.{TreeMap,TreeSet}
+import scala.collection.JavaConversions._
+
+class Iahx2Csv(parameters: Map[String,String]) {
+  val defNullCell = ""   // Empty cell string
+
+  def export() : Unit = {
+    val (isString, writer) = parameters.get("csvFile") match {
+      case Some(csv) =>
+        val outEncoding = parameters.getOrElse("outEncoding", "utf-8")
+        (false, Files.newBufferedWriter(new File(csv).toPath(),
+                                                  Charset.forName(outEncoding)))
+      case None => (true, new StringWriter())
+    }
+    toCsv(writer)
+    writer.close()
+
+    if (isString) println(writer.toString)
+  }
+
+  def exportFromJava(writer: Writer): Unit = {
+    toCsv(writer)
+    writer.close()
+  }
+
+  private def toCsv(writer: Writer): Unit = {
+    val i22 = new Iahx2Mongo2Json(parameters)
+    val it = i22.toJson()
+    val fieldDelim = parameters.getOrElse("fieldDelim", ",").charAt(0)
+    val export = parameters.getOrElse("exportFields", "").trim.split(" *, *")
+                                                  .filter(!_.isEmpty).toSet
+    val explode = parameters.getOrElse("explodeFields", "").trim.split(" *, *")
+                                                  .filter(!_.isEmpty).toSet
+    val csv = new CSVPrinter(writer, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
+    val header0 = ((if (export.isEmpty) i22.getHeader()
+                  else i22.getHeader().intersect(export)) - "_id").toList
+    val header = "_id" :: header0
+
+//println("header=" + header)
+
+    header.foreach(csv.print(_))
+    csv.println()
+
+    it.foreach {
+      case Some(doc) =>
+        writeFields(doc, header, explode, List(), csv)
+      case None => ()
+    }
+  }
+
+  private def writeFields(flds: Map[String,Any],
+                          header: List[String],
+                          expl: Set[String],
+                          prefix: List[String],
+                          csv: CSVPrinter): Unit = {
+//println(s"prefix=$prefix")
+    header match {
+      case Nil =>
+        prefix.foreach(csv.print(_))
+        csv.println()
+        csv.flush()
+      case h::t =>
+        flds.get(h) match {
+        case Some(fld) => fld match {
+          case lst:List[_] =>
+            if (expl.contains(h))
+              lst.foreach(elem =>
+                  writeFields(flds, t, expl, prefix :+ getString(elem), csv))
+            else writeFields(flds, t, expl, prefix :+ getString(lst), csv)
+          case elem => writeFields(flds, t, expl, prefix :+ getString(elem), csv)
+        }
+        case _ => writeFields(flds, t, expl, prefix :+ defNullCell, csv)
+      }
+    }
+  }
+
+  private def getString(elem: Any,
+                        unique: Boolean = true): String = {
+    elem match {
+      case map:Map[String,Any] =>
+        map.foldLeft[String]("") {
+          (s,e) => s + (if (s.isEmpty) if (unique) "" else "{" else "|") + e._1 +
+                                                    ":" + getString(e._2, false)
+        } + (if (unique) "" else "}")
+      case lst:List[Any] =>
+        lst.foldLeft[String]("") {
+          (s,e) => s + (if (s.isEmpty) if (unique) "" else "[" else "|") +
+                                                             getString(e, false)
+        } + (if (unique) "" else "]")
+      case x:Any => x.toString()
+    }
+  }
+}
+
+object Iahx2Csv extends App {
+  private def usage(): Unit = {
+    Console.err.println("usage: Iahx2Csv -query=(<expr>|@<queryFile>)" +
+                  "\n\t\t  [-csvFile=<fileName>]" +
+                  "\n\t\t  [-exportFields=<fld1>,<fld2>,...,<fldn>]" +
+                  "\n\t\t  [-from=<int>] [-quantity=<int>]" +
+                  "\n\t\t  [-convFile=<path>] [-convEncoding=<str>]" +
+                  "\n\t\t  [-outEncoding=<encod>] [-fieldDelim=<delimiter>]" +
+                  "\n\t\t  [-explodeFields=<fldName>,<fldName>,..,<fldName>]" +
+                  "\n\t\t  [-iahxServiceUrl=<url>]" +
+                  "\n\t\t  [-mongoHost=<host>] [-mongoPort=<port>]")
+    System.exit(1)
+  }
+  val parameters = args.foldLeft[Map[String,String]](Map()) {
+    case (map,par) => {
+      val split = par.split(" *= *", 2)
+      map + ((split(0).substring(1), split(1)))
+    }
+  }
+  parameters.get("query") match {
+    case Some(x) => ()
+    case None => usage()
+  }
+  new Iahx2Csv(parameters).export()
+}

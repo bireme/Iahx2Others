@@ -4,71 +4,50 @@ import java.io.{File, Writer}
 import java.nio.charset.Charset
 import java.nio.file.{Files,Paths}
 
-import org.apache.commons.csv._
+import org.apache.commons.csv.{CSVFormat,CSVPrinter}
 
 import scala.collection.immutable.{TreeMap,TreeSet}
+import scala.collection.JavaConversions._
 
-class Json2Csv {
-  val defNullCell = "<empty>"
+class Json2Csv(val parameters: Map[String,String]) {
+  val defNullCell = ""
 
-  def toFileCsv(it: () => Iterator[Option[Map[String,Any]]],
-                outFile: String,
-                parameters: Map[String,String]): Unit = {
-    val outEncoding = parameters.getOrElse("outEncoding", "utf-8")
-    val output = Files.newBufferedWriter(new File(outFile).toPath(),
-                                                   Charset.forName(outEncoding))
-    toCsv(it, output, parameters)
-    output.close()
-  }
-
-  def toCsv(it: () => Iterator[Option[Map[String,Any]]],
-            writer: Writer,
-            parameters: Map[String,String]): Unit = {
-
+  def toCsv(writer: Writer): Unit = {
+    val i22 = new Iahx2Mongo2Json(parameters)
+    val it = i22.toJson()
     val fieldDelim = parameters.getOrElse("fieldDelim", ",").charAt(0)
     val explode = parameters.getOrElse("explodeFields", "").trim.split(" *, *")
-                                                      .filter(!_.isEmpty).toSet
+                                                  .filter(!_.isEmpty).toSet
     val csv = new CSVPrinter(writer, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
-    val max = getMaxFldOcc(it(), explode)
-    val header = getHeader(max)
-    val fields = List() ++ max.keys
+    val header = i22.getHeader()
+
+println("header=" + header)
 
     header.foreach(csv.print(_))
     csv.println()
 
-    it().foreach {
-      case Some(doc) => {
-        fields.foreach {
-          fld => if (doc.contains(fld)) {
-            val field = if (doc(fld) == null) "" else doc(fld) // field can be null
-            printField(field, csv, max(fld))
-          } else {
-            if (explode(fld)) for (i <- 0 until max(fld)) csv.print(defNullCell)
-            else csv.print(defNullCell)
-          }
-        }
-        csv.println()
-      }
+    it.foreach {
+      case Some(doc) => writeFields(doc, explode, List(), csv)
       case None => ()
     }
-    csv.flush()
-    //writer.close()
   }
 
-  private def printField(fld: Any,
-                         csv: CSVPrinter,
-                         times: Int): Unit = {
-    fld match {
-      case lst:List[_] => {
-        if (times == 1) csv.print(getString(lst, false))
-        else {
-          lst.foreach(x => csv.print(getString(x)))
-          for (i <- lst.size until times) csv.print(defNullCell)
-        }
-      }
-      case e:Any => {
-        csv.print(getString(e))
-        for (i <- 1 until times) csv.print(defNullCell)
+  private def writeFields(flds: Map[String,Any],
+                          expl: Set[String],
+                          prefix: List[String],
+                          csv: CSVPrinter): Unit = {
+    if (flds.isEmpty) {
+      prefix.foreach(csv.print(_))
+      csv.println()
+      csv.flush()
+    } else flds.head match {
+      case (k,v) => v match {
+        case lst:List[_] =>
+          if (expl.contains(k))
+            lst.foreach(elem =>
+                   writeFields(flds.tail, expl, prefix :+ getString(elem), csv))
+          else writeFields(flds.tail, expl, prefix :+ getString(lst), csv)
+        case elem => writeFields(flds.tail, expl, prefix :+ getString(elem), csv)
       }
     }
   }
@@ -76,49 +55,23 @@ class Json2Csv {
   private def getString(elem: Any,
                         unique: Boolean = true): String = {
     elem match {
-      case map:Map[String,Any] => map.foldLeft[String]("") {
-        case(s,e) => {
-          s +
-          (if (s.isEmpty) if (unique) "" else "{" else "|") +
-          e._1 + ":" + getString(e._2, false)
-        }
-      } + (if (unique) "" else "}")
-      case lst:List[Any] => lst.foldLeft[String]("") {
-        case(s,e) => {
-          s +
-          (if (s.isEmpty) if (unique) "" else "[" else "|") +
-          getString(e, false)
-        }
-      } + (if (unique) "" else "]")
-      case x:Any => x.toString()
-    }
-  }
-
-  private def getMaxFldOcc(docs: Iterator[Option[Map[String,_]]],
-                           explode: Set[String]): Map[String,Int] = {
-    docs.foldLeft[Map[String,Int]](TreeMap()) {
-      case(map,Some(doc)) => doc.foldLeft[Map[String,Int]](map) {
-        case(map2,(k,v)) => {
-          val max = map2.getOrElse(k, 0)
-          val qtt = v match {
-            case lst:List[_] => if (explode(k)) lst.size else 1
-            case _ => 1
+      case map:Map[String,Any] =>
+        map.foldLeft[String]("") {
+          case(s,e) => {
+            s +
+            (if (s.isEmpty) if (unique) "" else "{" else "|") +
+              e._1 + ":" + getString(e._2, false)
           }
-          if (qtt> max) map2 + ((k, qtt)) else map2
-        }
-      }
-      case(map,None) => map
-    }
-  }
-
-  private def getHeader(max: Map[String,Int]): List[String] = {
-    max.foldLeft[List[String]](List()) {
-      case (lst, (k,v)) => {
-        if (v < 2) lst :+ k
-        else (1 to v).foldLeft[List[String]](lst) {
-          case (lst2,i) => lst2 :+ (k + "[" + i + "]")
-        }
-      }
+        } + (if (unique) "" else "}")
+      case lst:List[Any] =>
+        lst.foldLeft[String]("") {
+          case(s,e) => {
+            s +
+            (if (s.isEmpty) if (unique) "" else "[" else "|") +
+            getString(e, false)
+          }
+        } + (if (unique) "" else "]")
+      case x:Any => x.toString()
     }
   }
 }

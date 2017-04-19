@@ -13,73 +13,107 @@ import org.apache.http.impl.client.HttpClientBuilder
 import org.apache.http.message.BasicNameValuePair
 import org.apache.http.util.EntityUtils
 
-import scala.collection.immutable.TreeMap
+import scala.collection.immutable.TreeSet
 import scala.collection.JavaConverters._
 import scala.io.Source
 import scala.util.parsing.json.JSON
 
-class Iahx2Mongo2Json {
-  def toJson(query: String,
-             parameters: Map[String,String]):
-                                           Iterator[Option[Map[String,Any]]] = {
-    System.setProperty(DEFAULT_LOG_LEVEL_KEY, "ERROR")
+class Iahx2Mongo2Json(val parameters: Map[String,String]) {
+  System.setProperty(DEFAULT_LOG_LEVEL_KEY, "ERROR")
 
-    val fields = parameters.getOrElse("exportFields", "").split(" *, *").
-                                            map(_.trim).filter(!_.isEmpty).toSet
+  val host = parameters.getOrElse("mongoHost", "mongodb.bireme.br")
+  val port = parameters.getOrElse("mongoPort", "27017").toInt
+  val from = parameters.getOrElse("from", "0").toInt
+  val quantity0 = parameters.getOrElse("quantity", "1000").toInt
+  val quantity = if (quantity0 <= 0) Integer.MAX_VALUE else quantity0
+  val convFile = parameters.getOrElse("convFile", "convertion.txt")
+  val convEncoding = parameters.getOrElse("convEncoding", "utf-8")
+  val colls = getCollections(host, port, convFile, convEncoding)
+println(s"colls=$colls")
+  val exportFields = parameters.getOrElse("exportFields", "").split(" *, *").
+                                          map(_.trim).filter(!_.isEmpty).toSet
+
+  def getHeader(): Set[String] = {
+      colls.values.foldLeft[Set[String]](TreeSet()) {
+        case (set,col) => set ++ getHeader(col)
+      }
+  }
+
+  def getHeader(mcol: MongoCollection): Set[String] = {
+    mcol.findOneByID("!0!") match {
+      case Some(doc: BasicDBObject) =>
+        new MongoDBObject(doc).get("fields") match {
+          case Some(flds: BasicDBList) =>
+            new MongoDBList(flds).foldLeft[Set[String]](Set()) {
+              (set,fld) => new MongoDBObject(fld.asInstanceOf[DBObject])
+                                                              .get("id") match {
+                case Some(id:String) => set + id
+                case _ => set
+              }
+            }
+          case _ => Set()
+        }
+      case _ => Set()
+    }
+  }
+
+  def toJson(): Iterator[Option[Map[String,Any]]] = {
+    val query = parameters.getOrElse("query", "")
     val iahxServUrl = parameters.getOrElse("iahxServiceUrl",
                               "http://db02dx.bireme.br:8983/portal-org/select/")
-    val host = parameters.getOrElse("mongoHost", "mongodb.bireme.br")
-    val port = parameters.getOrElse("mongoPort", "27017").toInt
-    val from = parameters.getOrElse("from", "0").toInt
-    val quantity = parameters.getOrElse("quantity", "1000").toInt
-    val convFile = parameters.getOrElse("convFile", "convertion.txt")
-    val convEncoding = parameters.getOrElse("convEncoding", "utf-8")
-
-    val colls = getCollections(host, port, convFile, convEncoding)
     val ids = getIds(iahxServUrl, query, from, quantity)
-//println(ids)
-    //val ids2 = ids.filter(id => id.startsWith("lil-"))
-
-    export(ids, colls, fields)
+println(s"ids found = ${ids.size}")
+    export(ids, colls)
   }
 
   private def export(ids: List[String],
-                     colls: Map[String, MongoCollection],
-                     exportFields: Set[String]):
+                     colls: Map[String, MongoCollection]):
                                            Iterator[Option[Map[String,Any]]] = {
     new Iterator[Option[Map[String,Any]]] {
-      var ids2 = ids
-
-      def hasNext = !ids2.isEmpty
-
-      def next(): Option[Map[String, Any]] = {
-        if (!hasNext) None
-
-        val split = ids2.head.split("-", 2)
-        ids2 = ids2.tail
-
-        colls.get(split(0)) match {
-          case Some(col) => {
-            val res = if (exportFields.isEmpty) {
-              col.findOneByID(split(1))
-            } else {
-              val flds = exportFields.map(f => (f,1)).toList
-              col.findOneByID(split(1), MongoDBObject(flds))
-            }
-            res match {
-              case Some(obj: BasicDBObject) => {
-                Some(JSON.parseFull(obj.toString()).get.
-                                                  asInstanceOf[Map[String,Any]])
-              }
-              case _ => None
-            }
-          }
-          case None => {
-            Console.err.println("prefix [" + split(0) +
-                                                "] not found. Database skiped.")
-            next()
+      val flds = exportFields.map(f => (f,1)).toList
+      val filter = MongoDBObject(exportFields.map(f => (f,1)).toList)
+      val ids2 = ids.foldLeft[Map[String,Set[String]]](Map()) {
+        (map,id) => {
+          val split = id.split("-", 2)
+          if (split.length < 2) {
+            Console.err.println("Skipping invalid identifier: " + id)
+            map
+          } else {
+            val set = map.getOrElse(split(0),Set())
+            map + ((split(0), set + split(1)))
           }
         }
+      }
+      val cursors = ids2.foldLeft[List[MongoCursor]](List()) {
+        (lst,kv) => colls.get(kv._1) match {
+          case Some(coll) =>
+            val in = MongoDBObject("$in" -> kv._2)
+            val query = MongoDBObject("_id" -> in)
+            lst :+ coll.find(query, filter)
+          case None =>
+            Console.err.println("Missing collection associated to " + kv._1)
+            lst
+        }
+      }
+      var curCursors = cursors
+
+      def hasNext: Boolean = {
+        curCursors match {
+          case cursor::tail =>
+            if (cursor.hasNext) true
+            else {
+              curCursors = tail
+              hasNext
+            }
+          case Nil => false
+        }
+      }
+
+      def next(): Option[Map[String, Any]] = {
+        if (hasNext) {
+          val obj = curCursors.head.next
+          Some(JSON.parseFull(obj.toString()).get.asInstanceOf[Map[String,Any]])
+        } else None
       }
     }
   }
@@ -98,14 +132,11 @@ class Iahx2Mongo2Json {
     val reader = Source.fromFile(convFile, convEncoding)
     val lines = reader.getLines()
     val map = lines.foldLeft[Map[String,(String,String)]](Map()) {
-      (map,line) => {
-        line.trim match {
-          case "" => map
-          case l => {
-            val elems = l.split(" +", 3)
-            map + ((elems(0), (elems(1), elems(2))))
-          }
-        }
+      (map,line) => line.trim match {
+        case "" => map
+        case l =>
+          val elems = l.split(" +", 3)
+          map + ((elems(0), (elems(1), elems(2))))
       }
     }
     reader.close()
@@ -114,12 +145,10 @@ class Iahx2Mongo2Json {
       case (mp, (k,v)) => if (mp.contains(v._1)) mp
                           else mp + ((v._1, mongoClient(v._1)))
     }
-
     map.foldLeft[Map[String,MongoCollection]](Map()) {
-      case (mp, (k,v)) => {
+      case (mp, (k,v)) =>
         val col = nameDb(v._1)(v._2)
         mp + ((k, col))
-      }
     }
   }
 
@@ -144,6 +173,7 @@ class Iahx2Mongo2Json {
     val response = httpClient.execute(post);
     val entity = response.getEntity();
     val content = if (entity == null) "" else EntityUtils.toString(entity)
+//println(s"content=[$content]")
     httpClient.close()
     if (content.isEmpty) List()
     else {
@@ -158,7 +188,7 @@ class Iahx2Mongo2Json {
 object Iahx2Mongo2Json extends App {
 
   private def usage(): Unit = {
-    Console.err.println("usage: Iahx2Mongo2Json (<query>|@<queryFile>)" +
+    Console.err.println("usage: Iahx2Mongo2Json -query=(<query>|@<queryFile>)" +
                   "\n\t\t  [-exportFields=<fld1>,<fld2>,...,<fldn>]" +
                   "\n\t\t  [-iahxServiceUrl=<url>]" +
                   "\n\t\t  [-mongoHost=<host>] [-mongoPort=<port>]" +
@@ -167,16 +197,18 @@ object Iahx2Mongo2Json extends App {
     System.exit(1)
   }
 
-  if (args.length < 1) usage()
-
-  val parameters = args.drop(1).foldLeft[Map[String,String]](Map()) {
-    case (map,par) => {
+  val parameters = args.foldLeft[Map[String,String]](Map()) {
+    (map,par) => {
       val split = par.split(" *= *", 2)
       map + ((split(0).substring(1), split(1)))
     }
   }
-  val imj = new Iahx2Mongo2Json()
-  val expo = imj.toJson(args(0), parameters)
+  parameters.get("query") match {
+    case Some(x) => ()
+    case None => usage()
+  }
 
+  val imj = new Iahx2Mongo2Json(parameters)
+  val expo = imj.toJson()
   expo.foreach(println)
 }

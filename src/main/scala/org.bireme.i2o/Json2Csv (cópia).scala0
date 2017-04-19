@@ -1,0 +1,111 @@
+package org.bireme.i2o
+
+import java.io.{File, Writer}
+import java.nio.charset.Charset
+import java.nio.file.{Files,Paths}
+
+import org.apache.commons.csv._
+
+import scala.collection.immutable.{TreeMap,TreeSet}
+
+class Json2Csv(val parameters: Map[String,String]) {
+  val defNullCell = ""
+
+  def toCsv(): Unit = {
+    val i22 = new Iahx2Mongo2Json(parameters)
+    val it = i22.toJson()
+    val fieldDelim = parameters.getOrElse("fieldDelim", ",").charAt(0)
+    val explode = parameters.getOrElse("explodeFields", "").trim.split(" *, *")
+                                                  .filter(!_.isEmpty).toSet
+    val tmpFile = File.createTempFile("dedup_", "_tmp")
+    val outEncoding = parameters.getOrElse("outEncoding", "utf-8")
+    val writer = Files.newBufferedWriter(tmpFile.toPath(),
+                                                   Charset.forName(outEncoding))
+    val csv = new CSVPrinter(writer, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
+    val max = i22.getMaxFldOcc()
+    val header = getHeader(max, explode)
+    val fields = max.keys.toList
+println("max=" + max)
+println("header=" + header)
+println("fields=" + fields)
+
+    header.foreach(csv.print(_))
+    csv.println()
+
+    it.foreach {
+      case Some(doc) => {
+        fields.foreach {
+          fld => if (doc.contains(fld)) {
+            val field = if (doc(fld) == null) "" else doc(fld) // field can be null
+            val times = if (explode(fld)) max(fld) else 1
+            printField(field, csv, times)
+          } else {
+            if (explode(fld)) for (i <- 0 until max(fld)) csv.print(defNullCell)
+            else csv.print(defNullCell)
+          }
+        }
+        csv.println()
+      }
+      case None => ()
+    }
+    csv.flush()
+    //writer.close()
+  }
+
+  private def printField(fld: Any,
+                         csv: CSVPrinter,
+                         times: Int): Unit = {
+    fld match {
+      case lst:List[_] => {
+        if (times == 1) csv.print(getString(lst, false))
+        else {
+          lst.foreach(x => csv.print(getString(x)))
+          for (i <- lst.size until times) csv.print(defNullCell)
+        }
+      }
+      case e:Any => {
+        csv.print(getString(e))
+        for (i <- 1 until times) csv.print(defNullCell)
+      }
+    }
+  }
+
+  private def getString(elem: Any,
+                        unique: Boolean = true): String = {
+    elem match {
+      case map:Map[String,Any] =>
+        map.foldLeft[String]("") {
+          case(s,e) => {
+            s +
+            (if (s.isEmpty) if (unique) "" else "{" else "|") +
+              e._1 + ":" + getString(e._2, false)
+          }
+        } + (if (unique) "" else "}")
+      case lst:List[Any] =>
+        lst.foldLeft[String]("") {
+          case(s,e) => {
+            s +
+            (if (s.isEmpty) if (unique) "" else "[" else "|") +
+            getString(e, false)
+          }
+        } + (if (unique) "" else "]")
+      case x:Any => x.toString()
+    }
+  }
+
+  private def getHeader(max: Map[String,Int],
+                        explode: Set[String]): List[String] = {
+    max.foldLeft[List[String]](List()) {
+      case (lst, (k,v)) => {
+        if (v < 2) lst :+ k
+        else if (explode(k)) {
+          (1 to v).foldLeft[List[String]](lst) {
+            case (lst2,i) => lst2 :+ (k + "[" + i + "]")
+          }
+        } else lst :+ k
+      }
+    }
+  }
+
+  //private def scanFile()
+}
