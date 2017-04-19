@@ -213,7 +213,7 @@ class Iahx2Csv(query: String,
           val qual = mat.group(3).toInt
           "/" + decs.getOrElse(qual, s"^s$qual")
         }
-        mat.appendReplacement(sb, s"descStr$qualStr");
+        mat.appendReplacement(sb, s"$descStr$qualStr");
       }
       mat.appendTail(sb)
       sb.toString()
