@@ -1,3 +1,24 @@
+/*=========================================================================
+
+    Copyright © 2017 BIREME/PAHO/WHO
+
+    This file is part of Iahx2Others.
+
+    Iahx2Others is free software: you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public License as
+    published by the Free Software Foundation, either version 2.1 of
+    the License, or (at your option) any later version.
+
+    Iahx2Others is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with Iahx2Others. If not, see <http://www.gnu.org/licenses/>.
+
+=========================================================================*/
+
 package org.bireme.i2o
 
 import bruma.master.Master
@@ -25,7 +46,28 @@ import scala.io.Source
 import scala.util.{Try, Success, Failure}
 import scala.util.parsing.json.JSON
 
+/** Exports documents from Iahx to a csv file
+*
+* @author: Heitor Barbieri
+* date: 20170102
+*/
 
+/**
+* Class constructor
+*
+* @param query Iahx query string used to export documents. If preceded by @
+*                means the file name with the query
+* @param queryFileEncoding Character encoding of the query file
+* @param csvFile Ouput comma separated file havig the exported documents
+* @param exportFields Document fields exported to the output file
+* @param from Exported document position from the Iahx retrieved documents
+* @param quantity Initial exported document position from the Iahx retrieved documents
+* @param outEncoding Output csv file character encoding
+* @param fieldDelim Repetitive field delimiter
+* @param explodeFields Indicate which repetitive fields will create multiple csv lines, one line per field occurrence
+* @param iahxServiceUrl Url of the Iahx service. If omitted a default one will be used
+* @param decsPath Path to Decs isis db if replacement of decs code to its content is desired or NONE if the numeric codes should be keeped. If the parameter is omitted, a default Decs database will be used"
+*/
 class Iahx2Csv(query: String,
                queryFileEncoding: String,
                csvFile: String,
@@ -38,9 +80,11 @@ class Iahx2Csv(query: String,
                iahxServiceUrl: String,
                decsPath: String) {
 
-  val defNullCell = ""   // Empty cell string
+  // Default empty cell string
+  val defNullCell = ""
 
-  val defFields = TreeSet("af", "ab", "ab_en", "ab_es", "ab_fr", "ab_pt", "af",
+  // Default csv output fields
+  val defFields = TreeSet("ab", "ab_en", "ab_es", "ab_fr", "ab_pt", "af",
     "afiliacao_autor", "au", "bvs", "carpha_languange", "cc", "cp", "ct", "da",
     "db", "entry_date", "fa", "fo", "id", "instance",
     "instituicao_pais_afiliacao", "ip", "is", "la", "mh", "mj_styh",
@@ -57,6 +101,9 @@ class Iahx2Csv(query: String,
   val decs =  if ((decsPath == null) || (decsPath.isEmpty)) Map.empty[Int,String]
               else loadDecs(decsPath)
 
+  /**
+    * Export documents retrived from Iahx to csv file
+    */
   def export() : Unit = {
     val (isString, writer) = if (csvFile.trim.isEmpty) (true, new StringWriter())
       else (false, Files.newBufferedWriter(new File(csvFile).toPath(),
@@ -67,11 +114,22 @@ class Iahx2Csv(query: String,
     if (isString) println(writer.toString)
   }
 
+  /**
+    * Export documents retrived from Iahx to csv file
+    *
+    * @param writer a writer output instead of a standard file
+    */
   def exportFromJava(writer: Writer): Unit = {
     toCsv(writer)
     writer.close()
   }
 
+  /**
+    * Create a map with decs id as key and decs descriptor as content
+    *
+    * @param path Decs database path
+    * @return Map with (decs_id,descriptor)
+    */
   private def loadDecs(path: String): Map[Int,String] = {
     val idField = 999
     val descField = 3
@@ -88,6 +146,11 @@ class Iahx2Csv(query: String,
     map.toMap
   }
 
+  /**
+    * Load documents and write then into a csvoutput
+    *
+    * @param writer the writer representing the csv output
+    */
   private def toCsv(writer: Writer): Unit = {
     val csv = new CSVPrinter(writer, CSVFormat.DEFAULT.withDelimiter(fieldDelim))
     val ids = getIds(query, queryFileEncoding, from, quantity)
@@ -106,6 +169,16 @@ class Iahx2Csv(query: String,
     }
   }
 
+  /**
+    * Given a query returns all document ids that are retrived from Iahx
+    *
+    * @param query String query or '@'query file
+    * @param queryFileEncoding Character encoding of query file, if it is used
+    *                          instead of a query string
+    * @param from Start index of the iahx returned ids
+    * @param quantity Number of ids to be returned
+    * @return a list of ids
+    */
   private def getIds(query: String,
                      queryFileEncoding: String,
                      from: Int,
@@ -137,6 +210,12 @@ class Iahx2Csv(query: String,
     }
   }
 
+  /**
+    * Given a url with server + document id returns a document in json format
+    *
+    * @param url url with iahx server + document id
+    * @return a json document represented by a map of (field name, content)
+    */
   private def getDocument(url: String): Map[String, Any] = {
     val map = JSON.parseFull(loadPage(url)).get.asInstanceOf[Map[String,Any]]
 
@@ -149,6 +228,12 @@ class Iahx2Csv(query: String,
     }
   }
 
+  /**
+    * Load the content of a web location
+    *
+    * @param url the web location whose content will be downloaded
+    * @return the content of a web location
+    */
   private def loadPage(url: String): String = {
     val html = Source.fromURL(url)
     val str = html.mkString
@@ -156,6 +241,15 @@ class Iahx2Csv(query: String,
     str
   }
 
+  /**
+    * Write a json document into a csv file
+    *
+    * @param flds the fields of the json document
+    * @param header the list of the names of the output fields, the csv header
+    * @param expl the set of fields that will be breaked into lines if they were repetitive
+    * @param prefix parameter used by recursion
+    * @param csv the object representing the output csv file
+    */
   private def writeFields(flds: Map[String,Any],
                           header: List[String],
                           expl: Set[String],
@@ -181,6 +275,13 @@ class Iahx2Csv(query: String,
     }
   }
 
+  /**
+    * Given a json element, returns its string representation
+    *
+    * @param elem a json element
+    * @param unique parameter used by recursion
+    * @return the string representation of the json element
+    */
   private def getString(elem: Any,
                         unique: Boolean = true): String = {
     elem match {
@@ -198,6 +299,13 @@ class Iahx2Csv(query: String,
     }
   }
 
+  /**
+    * Given an input string, replaces all descritor/qualifier codes of format
+    * '^d5555^s4444' into their content forms like 'MULHER/SAUDAVEL'
+    *
+    * @param in input string to have its decs codes replaced
+    * @return the input string with decs codes replaced bty their contents
+    */
   private def convertDecsCode(in: String): String = {
     if (decs.isEmpty) in else {
       val sb = new StringBuffer()
@@ -223,17 +331,20 @@ class Iahx2Csv(query: String,
 
 object Iahx2Csv extends App {
   private def usage(): Unit = {
-    Console.err.println("usage: Iahx2Csv -query=(<expr>|@<queryFile>)" +
-      "\n\t\t  [-queryFileEncoding=<encod>]" +
-      "\n\t\t  [-csvFile=<fileName>]" +
-      "\n\t\t  [-exportFields=<fld1>,<fld2>,...,<fldn>]" +
-      "\n\t\t  [-from=<int>]" +
-      "\n\t\t  [-quantity=(<int>|ALL)]" +
-      "\n\t\t  [-outEncoding=<encod>] [-fieldDelim=<delimiter>]" +
-      "\n\t\t  [-explodeFields=<fldName>,<fldName>,..,<fldName>]" +
-      "\n\t\t  [-iahxServiceUrl=<url>" +
-      "\n\t\t  [-decsPath=<path>] - Path to Decs isis db if replacement" +
-      " of decs code to its content is desired")
+    Console.err.println("usage: Iahx2Csv -query=(<expr>|@<queryFile>) - Iahx query used to export documents" +
+      "\n\t\t  [-queryFileEncoding=<encod>] - Character encoding of the query file" +
+      "\n\t\t  [-csvFile=<fileName>] - Ouput comma separated file havig the exported documents" +
+      "\n\t\t  [-exportFields=<fld1>,<fld2>,...,<fldn>] - Document fields exported to the output file" +
+      "\n\t\t  [-from=<int>] - Initial Exported document position from the Iahx retrieved documents" +
+      "\n\t\t  [-quantity=(<int>|ALL)] - Number of exported documents. Use ALL to export all retrieved docs" +
+      "\n\t\t  [-outEncoding=<encod>] - Output csv file character encoding" +
+      "\n\t\t  [-fieldDelim=<delimiter>] - Repetitive field delimiter" +
+      "\n\t\t  [-explodeFields=<fldName>,<fldName>,..,<fldName>] - Indicates which repetitive fields will create" +
+      " multiple csv lines, one line per field occurrence" +
+      "\n\t\t  [-iahxServiceUrl=<url>] - Url of the Iahx service. If omitted a default one will be used" +
+      "\n\t\t  [-decsPath=(<path>|NONE)] - Path to Decs isis db if replacement" +
+      " of decs code to its content is desired or NONE if the numeric codes should be keeped. " +
+      "If the parameter is omitted, a default Decs database will be used")
     System.exit(1)
   }
   val parameters = args.foldLeft[Map[String,String]](Map()) {
@@ -260,7 +371,8 @@ object Iahx2Csv extends App {
                                                        .filter(!_.isEmpty).toSet
   val iahxServiceUrl = parameters.getOrElse("iahxServiceUrl",
                          "http://bases.bireme.br:8986/solr5/portal/select").trim
-  val decsPath =  parameters.getOrElse("decsPath", "")
+  val decsPath0 =  parameters.getOrElse("decsPath", "/bases/fiadmin/migration/decs/decs ")
+  val decsPath = if (decsPath0.equals("NONE")) "" else decsPath0
 
   new Iahx2Csv(query, queryFileEncoding, csvFile, exportFields, from, quantity,
                outEncoding, fieldDelim, explodeFields, iahxServiceUrl, decsPath).
